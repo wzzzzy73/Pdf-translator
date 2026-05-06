@@ -1,9 +1,10 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 import fitz
-import os
 from openai import OpenAI
+import os
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
@@ -11,22 +12,19 @@ def translate(text):
     if not text.strip():
         return ""
 
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "翻譯英文成繁體中文，保留專業術語與格式"},
-                {"role": "user", "content": text}
-            ]
-        )
-        return res.choices[0].message.content
-    except Exception as e:
-        return f"[翻譯錯誤] {str(e)}"
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "你是專業翻譯，將英文精準翻譯成繁體中文，保留專業術語"},
+            {"role": "user", "content": text}
+        ]
+    )
+    return res.choices[0].message.content
 
 @app.route("/")
 def home():
     return '''
-    <h2>PDF翻譯</h2>
+    <h2>PDF 翻譯系統</h2>
     <form action="/upload" method="post" enctype="multipart/form-data">
         <input type="file" name="pdf">
         <button type="submit">上傳</button>
@@ -39,23 +37,31 @@ def upload():
     file.save("input.pdf")
 
     doc = fitz.open("input.pdf")
-    new_doc = fitz.open()
 
-    for page in doc:
+    result = []
+    out = fitz.open()
+
+    for i, page in enumerate(doc):
         text = page.get_text()
 
-        if not text.strip():
-            text = "（此頁無可讀文字）"
+        zh = translate(text)
 
-        translated = translate(text)
+        # 📌 回傳給前端（頁數+原文+翻譯）
+        result.append({
+            "page": i+1,
+            "original": text,
+            "translated": zh
+        })
 
-        new_page = new_doc.new_page()
-        new_page.insert_text((50, 50), translated)
+        # 📄 建立新PDF（不排版版）
+        p = out.new_page()
+        p.insert_text((50, 50),
+            f"Page {i+1}\n\nOriginal:\n{text}\n\nTranslated:\n{zh}"
+        )
 
-    output_path = "output.pdf"
-    new_doc.save(output_path)
+    out.save("output.pdf")
 
-    return send_file(output_path, as_attachment=True)
+    return send_file("output.pdf", as_attachment=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)

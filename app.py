@@ -4,25 +4,32 @@ import os
 from openai import OpenAI
 
 app = Flask(__name__)
+
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def translate(text):
-    res = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[
-            {"role": "system", "content": "把英文翻譯成繁體中文，保留專業術語"},
-            {"role": "user", "content": text}
-        ]
-    )
-    return res.choices[0].message.content
+    if not text.strip():
+        return ""
 
-@app.route("/", methods=["GET"])
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "翻譯英文成繁體中文，保留專業術語與格式"},
+                {"role": "user", "content": text}
+            ]
+        )
+        return res.choices[0].message.content
+    except Exception as e:
+        return f"[翻譯錯誤] {str(e)}"
+
+@app.route("/")
 def home():
     return '''
-    <h2>PDF 翻譯</h2>
+    <h2>PDF翻譯</h2>
     <form action="/upload" method="post" enctype="multipart/form-data">
         <input type="file" name="pdf">
-        <button type="submit">上傳翻譯</button>
+        <button type="submit">上傳</button>
     </form>
     '''
 
@@ -36,12 +43,19 @@ def upload():
 
     for page in doc:
         text = page.get_text()
+
+        if not text.strip():
+            text = "（此頁無可讀文字）"
+
         translated = translate(text)
 
-        p = new_doc.new_page()
-        p.insert_text((50,50), translated)
+        new_page = new_doc.new_page()
+        new_page.insert_text((50, 50), translated)
 
-    new_doc.save("output.pdf")
-    return send_file("output.pdf", as_attachment=True)
+    output_path = "output.pdf"
+    new_doc.save(output_path)
 
-app.run(host="0.0.0.0", port=10000)
+    return send_file(output_path, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
